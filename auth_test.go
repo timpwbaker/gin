@@ -13,66 +13,38 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestBasicAuth(t *testing.T) {
-	pairs := processAccounts(Accounts{
-		"admin": "password",
-		"foo":   "bar",
-		"bar":   "foo",
-	})
-
-	assert.Len(t, pairs, 3)
-	assert.Contains(t, pairs, authPair{
-		user:  "bar",
-		value: "Basic YmFyOmZvbw==",
-	})
-	assert.Contains(t, pairs, authPair{
-		user:  "foo",
-		value: "Basic Zm9vOmJhcg==",
-	})
-	assert.Contains(t, pairs, authPair{
-		user:  "admin",
-		value: "Basic YWRtaW46cGFzc3dvcmQ=",
-	})
-}
-
-func TestBasicAuthFails(t *testing.T) {
-	assert.Panics(t, func() { processAccounts(nil) })
-	assert.Panics(t, func() {
-		processAccounts(Accounts{
-			"":    "password",
-			"foo": "bar",
-		})
-	})
-}
-
 func TestBasicAuthSearchCredential(t *testing.T) {
-	pairs := processAccounts(Accounts{
+	accounts := Accounts{
 		"admin": "password",
 		"foo":   "bar",
 		"bar":   "foo",
-	})
+	}
 
-	user, found := pairs.searchCredential(authorizationHeader("admin", "password"))
+	user, found := accounts.searchCredential(authorizationHeader("admin", "password"))
 	assert.Equal(t, "admin", user)
 	assert.True(t, found)
 
-	user, found = pairs.searchCredential(authorizationHeader("foo", "bar"))
+	user, found = accounts.searchCredential(authorizationHeader("ADMIN", "password"))
+	assert.Equal(t, "admin", user)
+	assert.True(t, found)
+
+	user, found = accounts.searchCredential(authorizationHeader("foo", "bar"))
 	assert.Equal(t, "foo", user)
 	assert.True(t, found)
 
-	user, found = pairs.searchCredential(authorizationHeader("bar", "foo"))
+	user, found = accounts.searchCredential(authorizationHeader("bar", "foo"))
 	assert.Equal(t, "bar", user)
 	assert.True(t, found)
 
-	user, found = pairs.searchCredential(authorizationHeader("admins", "password"))
+	user, found = accounts.searchCredential(authorizationHeader("admins", "password"))
 	assert.Empty(t, user)
 	assert.False(t, found)
 
-	user, found = pairs.searchCredential(authorizationHeader("foo", "bar "))
+	user, found = accounts.searchCredential(authorizationHeader("foo", "bar "))
 	assert.Empty(t, user)
 	assert.False(t, found)
 
-	user, found = pairs.searchCredential("")
+	user, found = accounts.searchCredential("")
 	assert.Empty(t, user)
 	assert.False(t, found)
 }
@@ -143,4 +115,9 @@ func TestBasicAuth401WithCustomRealm(t *testing.T) {
 	assert.False(t, called)
 	assert.Equal(t, http.StatusUnauthorized, w.Code)
 	assert.Equal(t, "Basic realm=\"My Custom \\\"Realm\\\"\"", w.Header().Get("WWW-Authenticate"))
+}
+
+func authorizationHeader(user, password string) string {
+	base := user + ":" + password
+	return "Basic " + base64.StdEncoding.EncodeToString([]byte(base))
 }

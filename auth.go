@@ -7,8 +7,10 @@ package gin
 import (
 	"crypto/subtle"
 	"encoding/base64"
+	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 // AuthUserKey is the cookie name for user credential in basic auth.
@@ -17,22 +19,23 @@ const AuthUserKey = "user"
 // Accounts defines a key/value for user/pass list of authorized logins.
 type Accounts map[string]string
 
-type authPair struct {
-	value string
-	user  string
-}
-
-type authPairs []authPair
-
-func (a authPairs) searchCredential(authValue string) (string, bool) {
+func (a Accounts) searchCredential(authValue string) (string, bool) {
 	if authValue == "" {
 		return "", false
 	}
-	for _, pair := range a {
-		if pair.value == authValue {
-			return pair.user, true
+
+	providedUser, providedPassword, err := decodeBasicAuth(authValue)
+	if err != nil {
+		return "", false
+	}
+
+	for user, pass := range a {
+		if strings.ToLower(user) == strings.ToLower(providedUser) &&
+			pass == providedPassword {
+			return user, true
 		}
 	}
+
 	return "", false
 }
 
@@ -45,10 +48,9 @@ func BasicAuthForRealm(accounts Accounts, realm string) HandlerFunc {
 		realm = "Authorization Required"
 	}
 	realm = "Basic realm=" + strconv.Quote(realm)
-	pairs := processAccounts(accounts)
 	return func(c *Context) {
 		// Search user in the slice of allowed credentials
-		user, found := pairs.searchCredential(c.requestHeader("Authorization"))
+		user, found := accounts.searchCredential(c.requestHeader("Authorization"))
 		if !found {
 			// Credentials doesn't match, we return 401 and abort handlers chain.
 			c.Header("WWW-Authenticate", realm)
@@ -68,23 +70,27 @@ func BasicAuth(accounts Accounts) HandlerFunc {
 	return BasicAuthForRealm(accounts, "")
 }
 
-func processAccounts(accounts Accounts) authPairs {
-	assert1(len(accounts) > 0, "Empty list of authorized credentials")
-	pairs := make(authPairs, 0, len(accounts))
-	for user, password := range accounts {
-		assert1(user != "", "User can not be empty")
-		value := authorizationHeader(user, password)
-		pairs = append(pairs, authPair{
-			value: value,
-			user:  user,
-		})
-	}
-	return pairs
-}
+func decodeBasicAuth(authString string) (string, string, *Error) {
+	auth := strings.SplitN(authString, " ", 2)
 
-func authorizationHeader(user, password string) string {
-	base := user + ":" + password
-	return "Basic " + base64.StdEncoding.EncodeToString([]byte(base))
+	if len(auth) != 2 || auth[0] != "Basic" {
+		return "", "", &Error{
+			Err:  fmt.Errorf("httpbasic incorrect format"),
+			Type: ErrorTypePrivate,
+		}
+	}
+
+	payload, err := base64.StdEncoding.DecodeString(auth[1])
+	if err != nil {
+		return "", "", &Error{
+			Err:  fmt.Errorf("httpbasic could not decode"),
+			Type: ErrorTypePrivate,
+		}
+	}
+
+	values := strings.SplitN(string(payload), ":", 2)
+
+	return values[0], values[1], nil
 }
 
 func secureCompare(given, actual string) bool {
